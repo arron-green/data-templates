@@ -1,0 +1,91 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+//using System.Data;
+using System.Data.Common;
+
+<%
+	BeginNamespace();
+%>
+public abstract class Database : BaseDb
+{
+	protected internal Database(string connectionString, DbProviderFactory dbProviderFactory)
+		: base(connectionString, dbProviderFactory)
+	{
+		Connection.ConnectionString = Connection.ConnectionString.Replace("async=true", string.Empty);
+		Connection.ConnectionString = Connection.ConnectionString.Replace("asynchronous processing=true", string.Empty);
+		//Connection.ConnectionString = Connection.ConnectionString.Replace("multipleactiveresultsets=true", string.Empty);
+	}
+
+	//internal DbTransaction _transaction;
+	//protected DbTransaction Transaction
+	//{
+	//    get { return _transaction; }
+	//    set { _transaction = value; }
+	//}
+
+	///// <summary>
+	///// Starts a database transaction
+	///// </summary>
+	//public void BeginTransaction()
+	//{
+	//    if (Connection.State == ConnectionState.Closed)
+	//        Connection.Open();
+
+	//    _transaction = Connection.BeginTransaction();
+	//}
+
+	///// <summary>
+	///// Starts a database transaction with the specified isolation level
+	///// </summary>
+	//public void BeginTransaction(IsolationLevel isolationLevel)
+	//{
+	//    if (Connection.State == ConnectionState.Closed)
+	//        Connection.Open();
+
+	//    _transaction = Connection.BeginTransaction(isolationLevel);
+	//}
+
+	///// <summary>
+	///// Commits the database transaction
+	///// </summary>
+	//public void Commit()
+	//{
+	//    if (_transaction != null) {
+	//        _transaction.Commit();
+	//        _transaction.Dispose();
+	//    }
+	//}
+
+	///// <summary>
+	///// Rolls back a transaction from a pending state
+	///// </summary>
+	//public void Rollback()
+	//{
+	//    if (_transaction != null) {
+	//        _transaction.Rollback();
+	//        _transaction.Dispose();
+	//    }
+	//}
+
+	///// <summary>
+	///// Specifies the isolation level for a transaction
+	///// </summary>
+	//public IsolationLevel IsolationLevel
+	//{
+	//    get
+	//    {
+	//        return _transaction != null ? _transaction.IsolationLevel : IsolationLevel.Unspecified;
+	//    }
+	//}
+
+	//protected override void DisposeManagedResources()
+	//{
+	//    base.DisposeManagedResources();
+
+	//    if (_transaction != null)
+	//        _transaction.Dispose();
+	//}
+}
+<%
+	EndNamespace();
+%>

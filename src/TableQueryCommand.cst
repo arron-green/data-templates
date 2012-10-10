@@ -1,0 +1,152 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" CompilerVersion="v3.5" %>
+<%@ Assembly Name="SchemaExplorer" %>
+<%@ Assembly Src="Common.cs" %>
+<%@ Assembly Src="Extensions.cs" %>
+<%@ Import Namespace="CodeSmith.Engine" %>
+<%@ Import Namespace="SchemaExplorer" %>
+<%@ Import Namespace="System.Collections.Generic" %>
+<%@ Import Namespace="System.Data" %>
+<%@ Map Name="CSharpToDataHandler" Src="Maps\CSharp-DataHandler.csmap" %>
+<%@ Map Name="DbTypeToCSharp" Src="Maps\DbType-CSharp.csmap" %>
+<%@ Map Name="DbTypeToDataHandler" Src="Maps\DbType-DataHandler.csmap" %>
+<%@ Property Name="CommandName" Type="System.String" %>
+<%@ Property Name="Table" Type="SchemaExplorer.TableSchema" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" Optional="True" %>
+<script runat="template">
+	public _CodeSmith.Command XmlCommand { get; set; }
+	public _CodeSmith.CommandResult CommandResult { get; set; }
+</script>
+
+<%
+	//set up delegate
+	var rowName = CommandName + "ResultRow";
+	var methodParams = new List<string>();
+		
+	foreach (var column in CommandResult.Columns) {
+		var param = StringUtil.ToCamelCase(column.Name).ToValidCSharpVariableName();
+					
+		if (Common.IsValueType(column.DataType.ToString()) && column.Nullable)
+			methodParams.Add(column.DataType.ToString() + "? " + param);
+		else if (column.DataType == _CodeSmith.DataType.binary)
+			methodParams.Add("byte[] " + param);
+		else
+			methodParams.Add(column.DataType.ToString() + " " + param);
+	}
+%>
+public delegate T <%=rowName%>Converter<out T>(<%=string.Join(", ", methodParams.ToArray())%>);
+
+protected internal <%=CommandName%>Result<T> <%=CommandName%>Result<T>(IDataReader reader, <%=rowName%>Converter<T> converter) where T : class
+{
+	var result = new <%=CommandName%>Result<T> { <%=StringUtil.ToPlural(rowName)%> = new List<T>() };
+	
+	while (reader.Read()) {
+		var item = converter(
+<%
+	for (int j = 0; j < CommandResult.Columns.Count(); j++) {
+		var column = CommandResult.Columns[j];
+				
+		if (Common.IsValueType(column.DataType.ToString())) {
+			if (column.Nullable) {
+				if (!CSharpToDataHandler.ContainsKey(column.DataType.ToString()))
+					throw new Exception("Add " + column.DataType.ToString() + " to CSharpToDataHandler");
+%>
+			<%=CSharpToDataHandler[column.DataType.ToString()]%>FromDb(reader["<%=column.Name%>"])<%=(j == CommandResult.Columns.Count() - 1) ? string.Empty : ","%>
+<%
+			}
+			else {
+%>
+			(<%=column.DataType.ToString()%>)reader["<%=column.Name%>"]<%=(j == CommandResult.Columns.Count() - 1) ? string.Empty : ","%>
+<%
+			}
+		}
+		else {
+			if (column.DataType == _CodeSmith.DataType.binary) {
+%>
+			BytesFromReader(reader, "<%=column.Name%>")<%=(j == CommandResult.Columns.Count - 1) ? string.Empty : ","%>
+<%
+			}
+			else {
+%>
+			reader["<%=column.Name%>"] as <%=column.DataType.ToString()%><%=(j == CommandResult.Columns.Count() - 1) ? string.Empty : ","%>
+<%
+			}
+		}
+	}
+%>
+		);
+		
+		if (item != null)
+			result.<%=StringUtil.ToPlural(rowName)%>.Add(item);
+	}
+
+	if (!reader.IsClosed)
+		reader.Close();
+		
+	reader.Dispose();
+	
+	return result;
+}
+
+/// <summary>
+/// gets records from the <%=Table.Name%> table
+/// </summary>
+public <%=CommandName%>Result<T> <%=CommandName%><T>(<%=rowName%>Converter<T> converter) where T : class
+{
+	<%=CommandName%>Result<T> result = null;
+	
+	var retry = false;
+	var attempts = 0;
+	const int maxAttempts = <%=XmlCommand.MaxAttempts%>;
+	
+	do {
+		attempts++;
+			
+<%
+	var columnNames = new List<string>();
+	foreach (var column in CommandResult.Columns) {
+		columnNames.Add(string.Format("[{0}]", column.Name));
+	}
+%>
+		using (var command = CreateQueryCommand("SELECT <%=string.Join(", ", columnNames.ToArray())%> FROM [<%=Table.Owner%>].[<%=Table.Name%>]")) {
+<%
+	int commandTimeout;
+	if (!string.IsNullOrEmpty(XmlCommand.CommandTimeout) && int.TryParse(XmlCommand.CommandTimeout, out commandTimeout)) {
+%>
+			command.CommandTimeout = <%=commandTimeout%>;
+<%
+	}
+%>
+			if (Connection.State == ConnectionState.Closed)
+				Connection.Open();
+                
+            IDataReader reader = null;
+			
+		    try {
+				reader = command.ExecuteReader(CommandBehavior.SingleResult);
+				
+				result = <%=CommandName%>Result(reader, converter);
+
+				retry = false;
+			}
+            catch (System.Data.SqlClient.SqlException exSql) {
+                switch (exSql.Number) {
+					case ConnectionRefused:
+						retry = attempts < maxAttempts;
+						
+						if (!retry)
+							ThrowDatabaseException(exSql, command);
+
+						break;
+					default:
+						ThrowDatabaseException(exSql, command);
+						break;
+                }
+            }
+		    catch (Exception ex) {
+			    ThrowDatabaseException(ex, command);
+		    }
+        }
+	} while (retry);
+	
+	return result;
+}

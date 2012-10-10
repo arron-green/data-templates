@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema targetNamespace="http://www.arschema.com"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:rschma="http://www.arschema.com"
+           elementFormDefault="qualified"
+           attributeFormDefault="unqualified">
+
+	<xs:element name="DataLayer">
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element name="CommandGroup" type="rschma:CommandGroup" minOccurs="0" maxOccurs="unbounded" />
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+
+	<xs:complexType name="CommandGroup">
+		<xs:sequence>
+			<xs:element name="Command" type="rschma:Command" minOccurs="0" maxOccurs="unbounded" />
+		</xs:sequence>
+		<xs:attribute name="DatabaseName" type="xs:string" use="required" />
+	</xs:complexType>
+
+	<xs:complexType name="Command">
+		<xs:sequence>
+			<xs:element name="Parameter" type="rschma:Parameter" minOccurs="0" maxOccurs="unbounded" />
+			<xs:element name="CommandResult" type="rschma:CommandResult" minOccurs="0" maxOccurs="unbounded" />
+		</xs:sequence>
+		<xs:attribute name="Name" type="xs:string" use="required" />
+		<xs:attribute name="NameOverride" type="xs:string" />
+		<xs:attribute name="AutoGenerateResults" type="xs:boolean" default="true" />
+		<xs:attribute name="CommandText" type="xs:string" />
+		<xs:attribute name="Cacheable" type="xs:boolean" default="false" />
+		<xs:attribute name="ResultType" type="rschma:ResultType" default="NonQuery" />
+		<xs:attribute name="MaxAttempts" type="xs:integer" default="1" />
+		<xs:attribute name="CommandTimeout" type="xs:string" />
+	</xs:complexType>
+
+	<xs:complexType name="Parameter">
+		<xs:attribute name="Name" type="xs:string" use="required" />
+		<xs:attribute name="DataType" type="rschma:DataType" default="string" />
+		<xs:attribute name="Exclude" type="xs:boolean" default="false" />
+		<xs:attribute name="Nullable" type="xs:boolean" default="false" />
+		<xs:attribute name="HardCodedValue" type="xs:string" />
+		<xs:attribute name="ForUpdate" type="xs:boolean" default="false" />
+	</xs:complexType>
+	
+	<xs:complexType name="CommandResult">
+		<xs:sequence>
+			<xs:element name="Column" type="rschma:ResultColumn" minOccurs="0" maxOccurs="unbounded" />
+		</xs:sequence>
+		<xs:attribute name="Name" type="xs:string" use="required" />
+	</xs:complexType>
+
+	<xs:complexType name="ResultColumn">
+		<xs:attribute name="Name" type="xs:string" use="required" />
+		<xs:attribute name="DataType" type="rschma:DataType" default="string" />
+		<xs:attribute name="Nullable" type="xs:boolean" default="false" />
+	</xs:complexType>
+
+	<xs:simpleType name="ResultType">
+		<xs:restriction base="xs:string">
+			<xs:enumeration value="NonQuery" />
+			<xs:enumeration value="Query" />
+			<xs:enumeration value="SingleRecord" />
+			<xs:enumeration value="ScalarFunction" />
+			<xs:enumeration value="DataSet" />
+            <xs:enumeration value="Table" />
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="DataType">
+		<xs:restriction base="xs:string">
+			<!--<xs:enumeration value="none" />-->
+			<xs:enumeration value="bool" />
+			<xs:enumeration value="DateTime" />
+			<xs:enumeration value="decimal" />
+			<xs:enumeration value="float" />
+			<xs:enumeration value="double" />
+			<xs:enumeration value="Guid" />
+			<xs:enumeration value="short" />
+			<xs:enumeration value="int" />
+			<xs:enumeration value="long" />
+			<xs:enumeration value="string" />
+			<xs:enumeration value="binary" />
+			<xs:enumeration value="byte" />
+			<xs:enumeration value="short" />
+		</xs:restriction>
+	</xs:simpleType>
+
+</xs:schema>

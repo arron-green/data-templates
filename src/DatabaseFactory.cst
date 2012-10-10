@@ -1,0 +1,40 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Name="CodeSmith.CustomProperties" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+<%@ Property Name="DatabaseNames" Optional="True" Type="CodeSmith.CustomProperties.StringCollection" %>
+using System.Configuration;
+using System.Data.Common;
+
+<%
+	BeginNamespace();
+%>
+public partial class DatabaseFactory : IDatabaseFactory
+{
+<%
+	foreach (var databaseName in DatabaseNames) {
+%>
+	public I<%=databaseName%>Database Create<%=databaseName%>Database()
+	{
+		var connectionString = GetConnectionString("<%=databaseName%>");
+		var dbProviderFactory = GetProviderFactory("<%=databaseName%>");
+		
+		return new <%=databaseName%>Database(connectionString, dbProviderFactory);
+	}
+	
+<%
+	}
+%>
+	protected static string GetConnectionString(string name)
+	{
+		return ConfigurationManager.ConnectionStrings[name].ConnectionString;
+	}
+
+	protected static DbProviderFactory GetProviderFactory(string name)
+	{
+		var provider = ConfigurationManager.ConnectionStrings[name].ProviderName;
+		return DbProviderFactories.GetFactory(provider);
+	}
+}
+<%
+	EndNamespace();
+%>

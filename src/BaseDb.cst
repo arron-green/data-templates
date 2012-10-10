@@ -1,0 +1,350 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+using System;
+using System.Data;
+using System.Data.Common;
+using System.Data.SqlTypes;
+using System.Linq;
+using System.Text;
+
+<%
+	BeginNamespace();
+%>
+public abstract class BaseDb : IDisposable
+{
+    protected internal const int ConnectionRefused = 10054;
+    
+	internal BaseDb(string connectionString, DbProviderFactory dbProviderFactory)
+	{
+		_connection = dbProviderFactory.CreateConnection();
+		_connection.ConnectionString = connectionString;
+		_dbProviderFactory = dbProviderFactory;
+	}
+
+	private readonly DbProviderFactory _dbProviderFactory;
+	protected DbProviderFactory DbProviderFactory
+	{
+		get { return _dbProviderFactory; }
+	}
+
+	private DbConnection _connection;
+	public DbConnection Connection
+	{
+		get { return _connection; }
+		internal set { _connection = value; }
+	}
+
+	protected DbCommand CreateStoredProcCommand(string name)
+	{
+		var command = DbProviderFactory.CreateCommand();
+		command.CommandType = CommandType.StoredProcedure;
+		command.CommandText = name;
+		command.Connection = Connection;
+
+		return command;
+	}
+
+	public DbCommand CreateQueryCommand(string sql)
+	{
+		var command = DbProviderFactory.CreateCommand();
+		command.CommandType = CommandType.Text;
+		command.CommandText = sql;
+		command.Connection = Connection;
+
+		return command;
+	}
+
+	public DbCommand CreateQueryCommand(string sql, params string[] args)
+	{
+		return CreateQueryCommand(string.Format(sql, args));
+	}
+
+	protected DbDataAdapter CreateDataAdapter(DbCommand command)
+	{
+		var adapter = DbProviderFactory.CreateDataAdapter();
+		adapter.SelectCommand = command;
+
+		return adapter;
+	}
+
+	protected void ThrowDatabaseException(Exception ex, DbCommand command)
+	{
+		var header = "Database: '" + Connection.Database + "'; Command: '" + command.CommandText + "'";
+		var dots = new string('-', header.Length);
+		var newMessage = new StringBuilder();
+		newMessage.AppendFormat("\r\n{0}\r\n{1}\r\n{0}\r\n", dots, header);
+
+		foreach (var parameter in command.Parameters.Cast<DbParameter>().Where(parameter => parameter.Direction == ParameterDirection.Input)) {
+			newMessage.AppendFormat("{0}: {1}\r\n", parameter.ParameterName, parameter.Value ?? "null");
+		}
+
+		throw new DatabaseException(newMessage.ToString(), ex);
+	}
+
+    #region -- Parameter Creation Methods --
+
+	protected DbParameter CreateParameter(string name, DbType dbType, ParameterDirection direction)
+	{
+		var param = DbProviderFactory.CreateParameter();
+		param.ParameterName = name;
+		param.DbType = dbType;
+		param.Direction = direction;
+
+		return param;
+	}
+
+	protected DbParameter CreateInParameter(string name, DbType dbType, object value)
+	{
+		var param = CreateParameter(name, dbType, ParameterDirection.Input);
+		param.Value = PrepParameterValue(dbType, value);
+	
+		return param;
+	}
+	
+	protected DbParameter CreateInParameter(string name, DbType dbType, object value, int size)
+	{
+		var param = CreateInParameter(name, dbType, value);
+		param.Size = size;
+	
+		return param;
+	}
+
+	protected object PrepParameterValue(DbType dbType, object value)
+	{
+		if (dbType == DbType.DateTime && value is DateTime) {
+			if ((DateTime)value < SqlDateTime.MinValue.Value)
+				value = SqlDateTime.MinValue.Value;
+			else if ((DateTime)value > SqlDateTime.MaxValue.Value)
+				value = SqlDateTime.MaxValue.Value;
+		}
+
+		return value ?? DBNull.Value;
+	}
+
+	protected DbParameter CreateOutParameter(string name, DbType dbType)
+	{
+		var param = CreateParameter(name, dbType, ParameterDirection.Output);
+
+		return param;
+	}
+
+	protected DbParameter CreateOutParameter(string name, DbType dbType, int size)
+	{
+		var param = CreateOutParameter(name, dbType);
+		param.Size = size;
+
+		return param;
+	}
+
+	#endregion
+
+	#region -- DB Value Methods --
+
+	protected short? Int16FromDb(object value)
+	{
+		if (value == null || value == DBNull.Value)
+			return null;
+
+		return (short)value;
+	}
+
+	protected int? IntegerFromDb(object value)
+	{
+		if (value == null || value == DBNull.Value)
+			return null;
+
+		return (int)value;
+	}
+
+	protected long? Int64FromDb(object value)
+	{
+		if (value == null || value == DBNull.Value)
+			return null;
+
+		return (long)value;
+	}
+
+	protected bool? BooleanFromDb(object value)
+	{
+		if (value == null || value == DBNull.Value)
+			return null;
+
+		return (bool)value;
+	}
+
+	protected double? DoubleFromDb(object value)
+	{
+		if (value == null || value == DBNull.Value)
+			return null;
+
+		return (double)value;
+	}
+
+	protected DateTime? DateTimeFromDb(object value)
+	{
+		if (value == null || value == DBNull.Value)
+			return null;
+
+		return (DateTime)value;
+	}
+
+	protected Guid? GuidFromDb(object value)
+	{
+		if (value == null || value == DBNull.Value)
+			return null;
+
+		return (Guid)value;
+	}
+
+	protected decimal? DecimalFromDb(object value)
+	{
+		if (value == null || value == DBNull.Value)
+			return null;
+
+		return (decimal)value;
+	}
+
+	protected byte? ByteFromDb(object value)
+	{
+		if (value == null || value == DBNull.Value)
+			return null;
+
+		return (byte)value;
+	}
+
+	protected byte[] BytesFromReader(IDataReader reader, string fieldName)
+	{
+		var index = reader.GetOrdinal(fieldName);
+		var length = (int)reader.GetBytes(index, 0L, null, 0, 0);
+		var buffer = new byte[length];
+		reader.GetBytes(index, 0L, buffer, 0, length);
+
+		return buffer;
+	}
+
+	#endregion
+
+	#region -- Parameter Value Methods --
+
+	protected byte? ByteFromParam(DbCommand command, string paramName)
+	{
+		if (command.Parameters[paramName] == null || command.Parameters[paramName].Value == DBNull.Value)
+			return null;
+
+		return (byte)command.Parameters[paramName].Value;
+	}
+	
+	protected short? Int16FromParam(DbCommand command, string paramName)
+	{
+		if (command.Parameters[paramName] == null || command.Parameters[paramName].Value == DBNull.Value)
+			return null;
+
+		return (short)command.Parameters[paramName].Value;
+	}
+
+	protected int? IntegerFromParam(DbCommand command, string paramName)
+	{
+		if (command.Parameters[paramName] == null || command.Parameters[paramName].Value == DBNull.Value)
+			return null;
+
+		return (int)command.Parameters[paramName].Value;
+	}
+
+	protected long? Int64FromParam(DbCommand command, string paramName)
+	{
+		if (command.Parameters[paramName] == null || command.Parameters[paramName].Value == DBNull.Value)
+			return null;
+
+		return (long)command.Parameters[paramName].Value;
+	}
+
+	protected bool? BooleanFromParam(DbCommand command, string paramName)
+	{
+		if (command.Parameters[paramName] == null || command.Parameters[paramName].Value == DBNull.Value)
+			return null;
+
+		return (bool)command.Parameters[paramName].Value;
+	}
+
+	protected DateTime? DateTimeFromParam(DbCommand command, string paramName)
+	{
+		if (command.Parameters[paramName] == null || command.Parameters[paramName].Value == DBNull.Value)
+			return null;
+
+		return (DateTime)command.Parameters[paramName].Value;
+	}
+
+	protected string StringFromParam(DbCommand command, string paramName)
+	{
+		if (command.Parameters[paramName] == null || command.Parameters[paramName].Value == DBNull.Value)
+			return null;
+
+		return command.Parameters[paramName].Value as string;
+	}
+
+	protected Guid? GuidFromParam(DbCommand command, string paramName)
+	{
+		if (command.Parameters[paramName] == null || command.Parameters[paramName].Value == DBNull.Value)
+			return null;
+
+		return (Guid)command.Parameters[paramName].Value;
+	}
+
+	protected decimal? DecimalFromParam(DbCommand command, string paramName)
+	{
+		if (command.Parameters[paramName] == null || command.Parameters[paramName].Value == DBNull.Value)
+			return null;
+
+		return (decimal)command.Parameters[paramName].Value;
+	}
+
+	#endregion
+
+	#region -- IDisposable --
+
+	private bool _disposedValue; // To detect redundant calls
+
+	private void Dispose(bool disposing)
+	{
+		if (!_disposedValue) {
+			if (disposing)
+				DisposeManagedResources();
+
+			DisposeUnManagedResources();
+		}
+
+		_disposedValue = true;
+	}
+
+	protected virtual void DisposeManagedResources()
+	{
+		_connection.Dispose();
+	}
+
+	protected virtual void DisposeUnManagedResources()
+	{
+		// free unmanaged resources (unmanaged objects) and override Finalize() below.
+		// set large fields to null.
+	}
+
+	// override Finalize() only if Dispose(ByVal disposing As Boolean) above has code to free unmanaged resources.
+	//protected virtual void Finalize()
+	//{
+	//    // Do not change this code.  Put cleanup code in Dispose(ByVal disposing As Boolean) above.
+	//    Dispose(false);
+	//    base.Finalize();
+	//}
+
+	// This code added by Visual Basic to correctly implement the disposable pattern.
+	public void Dispose()
+	{
+		// Do not change this code.  Put cleanup code in Dispose(ByVal disposing As Boolean) above.
+		Dispose(true);
+		GC.SuppressFinalize(this);
+	}
+
+	#endregion
+}
+<%
+	EndNamespace();
+%>

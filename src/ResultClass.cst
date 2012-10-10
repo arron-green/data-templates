@@ -1,0 +1,143 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+<%@ Assembly Src="Common.cs" %>
+<%@ Map Name="DbTypeToCSharp" Src="Maps\DbType-CSharp.csmap" %>
+<%@ Property Name="DbCommand" Type="SchemaExplorer.CommandSchema" Optional="True" %>
+<%@ Property Name="CommandName" Type="System.String" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" Optional="True" %>
+<script runat="template">
+	public _CodeSmith.Command XmlCommand { get; set; }
+	public _CodeSmith.CommandResultCollection CommandResults { get; set; }
+</script>
+using System;
+using System.Collections.Generic;
+
+<%
+	BeginNamespace();
+	
+	var genericTypes = new List<string>();
+				
+	if (XmlCommand.CommandResults.Any()) {
+		for (int i = 0; i < XmlCommand.CommandResults.Count; i++) {
+			genericTypes.Add("T" + (i + 1).ToString());
+		}
+	}
+	else {
+		for (int i = 0; i < DbCommand.CommandResults.Count; i++) {
+			genericTypes.Add("T" + (i + 1).ToString());
+		}
+	}
+				
+	var joinedGenericTypes = string.Join(", ", genericTypes.ToArray());
+
+	if (XmlCommand.ResultType == _CodeSmith.ResultType.Query) {
+%>
+public partial class <%=CommandName%>Result<<%=joinedGenericTypes%>>
+{
+<%
+	}
+	else if (XmlCommand.ResultType == _CodeSmith.ResultType.Table) {
+%>
+public partial class <%=CommandName%>Result<T1>
+{
+<%
+	}
+	else {
+%>
+public partial class <%=CommandName%>Result
+{
+<%
+	}
+	
+	if (DbCommand != null) {
+		foreach (var parameter in DbCommand.AllOutputParameters) {
+            var xmlParameter = XmlCommand.Parameters.SingleOrDefault(p => p.Name == parameter.Name);
+            
+            if (xmlParameter != null && xmlParameter.Nullable) {
+%>
+	/// <summary>
+	/// mapped to the <%=parameter.Name%> output parameter
+	/// </summary>
+	public <%=DbTypeToCSharp[parameter.DataType.ToString()]%><%=Common.IsValueType(DbTypeToCSharp[parameter.DataType.ToString()]) ? "?" : ""%> <%=parameter.Name.Replace("@", string.Empty)%> { get; set; }
+
+<%
+            }
+            else {
+%>
+	/// <summary>
+	/// mapped to the <%=parameter.Name%> output parameter
+	/// </summary>
+	public <%=DbTypeToCSharp[parameter.DataType.ToString()]%> <%=parameter.Name.Replace("@", string.Empty)%> { get; set; }
+
+<%
+            }
+		}
+	}
+	
+	if (XmlCommand.ResultType == _CodeSmith.ResultType.NonQuery) {
+%>
+	/// <summary>
+	/// records affected by the <%=DbCommand.Name%> procedure
+	/// </summary>
+	public int RecordsAffected { get; set; }
+<%
+	}
+	else {
+		if (CommandResults.Count == 1 && XmlCommand.ResultType == _CodeSmith.ResultType.SingleRecord) {
+%>
+	/// <summary>
+	/// indicates if the record was found
+	/// </summary>
+	public bool RecordFound { get; set; }
+<%
+			foreach (var column in CommandResults[0].Columns) {
+				if (Common.IsValueType(column.DataType.ToString()) && column.Nullable) {
+%>
+	/// <summary>
+	/// mapped to the <%=column.Name%> column
+	/// </summary>
+	public <%=column.DataType.ToString()%>? <%=column.Name.Replace(" ", "")%> { get; set; }
+<%
+				}
+				else if (column.DataType == _CodeSmith.DataType.binary) {
+%>
+	/// <summary>
+	/// mapped to the <%=column.Name%> column
+	/// </summary>
+	public byte[] <%=column.Name.Replace(" ", "")%> { get; set; }
+<%
+				}
+				else {
+%>
+	/// <summary>
+	/// mapped to the <%=column.Name%> column
+	/// </summary>
+	public <%=column.DataType.ToString()%> <%=column.Name.Replace(" ", "")%> { get; set; }
+<%
+				}
+			}
+		}
+		else {
+			for (int i = 0; i < CommandResults.Count; i++) {
+				var result = CommandResults[i];
+				var isSingleSet = (i == 0 && i == CommandResults.Count - 1);
+				var rowName = CommandName + "ResultRow";
+	
+				if (!string.IsNullOrEmpty(result.Name))
+					rowName = result.Name;
+				else if (!isSingleSet)
+					rowName +=  (i + 1).ToString();
+%>
+	/// <summary>
+	/// mapped to the <%=StringUtil.ToPlural(rowName)%> record set
+	/// </summary>
+	public List<T<%=(i + 1).ToString()%>> <%=StringUtil.ToPlural(rowName)%> { get; set; }
+<%
+			}
+		}
+	}
+%>
+}
+<%
+	EndNamespace();
+%>

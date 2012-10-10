@@ -1,0 +1,188 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" CompilerVersion="v3.5" %>
+<%@ Map Name="CSharpToDbType" Src="Maps\CSharp-DbType.csmap" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" Optional="True" %>
+<script runat="template">
+	public _CodeSmith.Command XmlCommand { get; set; }
+	
+	protected string WhereString
+	{
+		get
+		{
+			var whereConditions = new List<string>();
+			
+			foreach (var parameter in XmlCommand.Parameters.Where(p => !p.ForUpdate)) {
+				whereConditions.Add(string.Format("[{0}] = @{0}", parameter.Name));
+			}
+			
+			return "WHERE " + string.Join(" AND ", whereConditions.ToArray());
+		}
+	}
+	
+	protected string SetString
+	{
+		get
+		{
+			var setStatements = new List<string>();
+			
+			foreach (var parameter in XmlCommand.Parameters.Where(p => p.ForUpdate)) {
+				setStatements.Add(string.Format("[{0}] = @{0}", parameter.Name));
+			}
+			
+			return "SET " + string.Join(", ", setStatements.ToArray());
+		}
+	}
+	
+	protected string InsertString
+	{
+		get
+		{
+			var columns = new List<string>();
+			var values = new List<string>();
+			
+			foreach (var parameter in XmlCommand.Parameters) {
+				columns.Add("[" + parameter.Name + "]");
+				values.Add(string.Format("@{0}", parameter.Name));
+			}
+			
+			return "(" + string.Join(", ", columns.ToArray()) + ") VALUES (" + string.Join(", ", values.ToArray()) + ")";
+		}
+	}
+</script>
+<%
+	//parameter definition for methods and method callers
+	var methodParameters = new List<string>();
+	var methodParametersToSend = new List<string>();
+	
+	foreach (var parameter in XmlCommand.Parameters) {
+		var dataType = parameter.DataType.ToString();
+		
+		if (parameter.DataType == _CodeSmith.DataType.binary)
+			dataType = "byte[]";
+			
+		if (parameter.Nullable)
+			methodParameters.Add(string.Format("{0}? {1}", dataType, StringUtil.ToCamelCase(parameter.Name)));
+		else
+			methodParameters.Add(string.Format("{0} {1}", dataType, StringUtil.ToCamelCase(parameter.Name)));
+				
+		methodParametersToSend.Add(StringUtil.ToCamelCase(parameter.Name));
+	}
+	
+	var joinedMethodParameters = string.Join(", ", methodParameters.ToArray());
+	var joinedMethodParametersToSend = string.Join(", ", methodParametersToSend.ToArray());
+%>
+
+/// <summary>
+/// executes not query sql
+/// </summary>
+public int <%=XmlCommand.Name%>(<%=joinedMethodParameters%>)
+{
+	int recordsAffected = 0;
+	
+	var retry = false;
+	var attempts = 0;
+	const int maxAttempts = <%=XmlCommand.MaxAttempts%>;
+
+	do {
+		attempts++;
+			
+		using (var command = Get<%=XmlCommand.Name%>Command(<%=joinedMethodParametersToSend%>)) {
+			if (Connection.State == ConnectionState.Closed)
+				Connection.Open();
+					
+		    try {
+				recordsAffected = command.ExecuteNonQuery();
+				retry = false;
+			}
+            catch (System.Data.SqlClient.SqlException exSql) {
+                switch (exSql.Number) {
+					case ConnectionRefused:
+						retry = attempts < maxAttempts;
+						
+						if (!retry)
+							ThrowDatabaseException(exSql, command);
+
+						break;
+					default:
+						ThrowDatabaseException(exSql, command);
+						break;
+                }
+            }
+            catch (Exception ex) {
+                ThrowDatabaseException(ex, command);
+            }
+        }
+	} while (retry);
+	
+	return recordsAffected;
+}
+
+private DbCommand Get<%=XmlCommand.Name%>Command(<%=joinedMethodParameters%>)
+{
+<%
+	if (XmlCommand.Parameters.Any()) {
+		var modifiedCommandText = XmlCommand.CommandText.Replace("[set]", SetString);
+		modifiedCommandText = modifiedCommandText.Replace("[insert]", InsertString);
+		modifiedCommandText = modifiedCommandText.Replace("[where]", WhereString);
+%>
+	var command = CreateQueryCommand("<%=modifiedCommandText%>");
+<%
+		int commandTimeout;
+		if (!string.IsNullOrEmpty(XmlCommand.CommandTimeout) && int.TryParse(XmlCommand.CommandTimeout, out commandTimeout)) {
+%>
+	command.CommandTimeout = <%=commandTimeout%>;
+<%
+		}
+%>
+	DbParameter[] paramList;
+	
+	if (ParameterCache.IsParameterSetCached(DB_KEY, "<%=XmlCommand.Name%>")) {
+		paramList = ParameterCache.GetCachedParameterSet(DB_KEY, "<%=XmlCommand.Name%>");
+	
+<%
+		for (var i = 0; i < XmlCommand.Parameters.Count; i++) {
+			var parameter = XmlCommand.Parameters[i];
+
+            if (parameter.HardCodedValue != null)
+                continue;
+			
+%>
+		paramList[<%=i%>].Value = PrepParameterValue(DbType.<%=CSharpToDbType[parameter.DataType.ToString()]%>, <%=StringUtil.ToCamelCase(parameter.Name)%>);
+<%
+		}
+%>
+	}
+	else {
+		paramList = new[] {
+<%
+		for (var i = 0; i < XmlCommand.Parameters.Count; i++) {
+			var parameter = XmlCommand.Parameters[i];
+			
+			if (parameter.HardCodedValue == null) {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=CSharpToDbType[parameter.DataType.ToString()]%>, <%=StringUtil.ToCamelCase(parameter.Name)%>)<%=(i < XmlCommand.Parameters.Count - 1) ? "," : string.Empty%>
+<%
+			}
+			else {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=CSharpToDbType[parameter.DataType.ToString()]%>, <%=parameter.HardCodedValue%>)<%=(i < XmlCommand.Parameters.Count - 1) ? "," : string.Empty%>
+<%
+			}
+		}
+%>
+		};
+		
+		ParameterCache.AddParameterSetToCache(DB_KEY, "<%=XmlCommand.Name%>", paramList);
+	}
+	
+	command.Parameters.AddRange(paramList);
+	
+<%
+	}
+	else {
+%>
+	var command = CreateQueryCommand("<%=XmlCommand.CommandText%>");
+<%
+	}
+%>
+	return command;
+}

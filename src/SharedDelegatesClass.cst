@@ -1,0 +1,36 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+<%@ Assembly Src="Common.cs" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" Optional="True" %>
+<script runat="template">
+	public _CodeSmith.CommandResultCollection XmlSharedResults { get; set; }
+</script>
+using System;
+
+<%
+	BeginNamespace();
+
+	//set up delegates
+	for (int i = 0; i < XmlSharedResults.Count; i++) {
+		var commandResult = XmlSharedResults[i];
+		var rowName = commandResult.Name; // + "ResultRow";
+
+		var methodParams = new List<string>();
+		
+		foreach (var column in commandResult.Columns) {
+			var param = StringUtil.ToCamelCase(column.Name);
+			
+			if (Common.IsValueType(column.DataType.ToString()) && column.Nullable)
+				methodParams.Add(column.DataType.ToString() + "? " + param);
+			else if (column.DataType == _CodeSmith.DataType.binary)
+				methodParams.Add("byte[] " + param);
+			else
+				methodParams.Add(column.DataType.ToString() + " " + param);
+		}
+%>
+public delegate T <%=rowName%>Converter<out T>(<%=string.Join(", ", methodParams.ToArray())%>);
+<%
+	}
+
+	EndNamespace();
+%>

@@ -1,0 +1,222 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Debug="True" CompilerVersion="v3.5" %>
+<%@ Assembly Name="CodeSmith.CustomProperties" %>
+<%@ Import Namespace="System.Collections.Generic" %>
+<%@ Import Namespace="System.IO" %>
+<%@ Register Name="BaseDbTemplate" Template="BaseDb.cst" %>
+<%@ Register Name="DatabaseTemplate" Template="Database.cst" %>
+<%@ Register Name="ParameterCacheTemplate" Template="ParameterCache.cst" %>
+<%@ Register Name="ICommandGroupTemplate" Template="ICommandGroup.cst" %>
+<%@ Register Name="CommandGroupTemplate" Template="CommandGroup.cst" %>
+<%@ Register Name="IDatabaseFactoryTemplate" Template="IDatabaseFactory.cst" %>
+<%@ Register Name="DatabaseFactoryTemplate" Template="DatabaseFactory.cst" %>
+<%@ Register Name="DatabaseExceptionTemplate" Template="DatabaseException.cst" %>
+<%@ Register Name="ExtensionsTemplate" Template="Extensions.cst" %>
+<%@ Register Name="ResultRowClassTemplate" Template="ResultRowClass.cst" %>
+<%@ Register Name="SharedDelegatesClassTemplate" Template="SharedDelegatesClass.cst" %>
+<%@ Property Name="Namespace" Type="System.String" Optional="True" Description="Namespace" %>
+<%@ Property Name="Sources" Type="Dictionary<string, SchemaExplorer.DatabaseSchema>" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" %>
+<script runat="template">
+	private const string BaseDbPath = "BaseDb.cs";
+	private const string ParameterCachePath = "ParameterCache.cs";
+	private const string DatabasePath = "Database.cs";
+	private const string IDatabaseFactoryPath = "IDatabaseFactory.cs";
+	private const string DatabaseFactoryPath = "DatabaseFactory.cs";
+    private const string DatabaseExceptionPath = "DatabaseException.cs";
+	private const string ExtensionsPath = "Extensions.cs";
+	
+	private List<string> _databaseNames = new List<string>();
+	
+	public override void Render(TextWriter writer)
+	{
+		//set up tracing
+		Trace.Listeners.Add(new TextWriterTraceListener(new System.IO.StreamWriter("output.txt"){AutoFlush = true}));
+		
+        //trace some shit
+        Trace.WriteLine("Inside of Controller.cst");
+
+		RenderBaseDb(writer, true);
+		RenderDatabase(writer, true);
+		RenderParameterCache(writer, true);
+		RenderCommandGroups(writer, true);
+		//RenderSharedResults(writer, true);
+		//RenderSharedDelegates(writer, true);
+		RenderDatabaseFactory(writer, true);
+		RenderExtensions(writer, true);
+       	RenderDatabaseException(writer, true);
+	}
+	
+	public void RenderBaseDb(TextWriter writer, bool toFile)
+	{
+		var template = this.Create<BaseDbTemplate>();
+		template.Namespace = Namespace;
+		
+		if (toFile) {
+			var outputFile = new OutputFile(BaseDbPath);
+			template.RenderToFile(outputFile, true);
+		}
+		else {
+			template.Render(writer);
+		}
+	}
+
+	public void RenderDatabase(TextWriter writer, bool toFile)
+	{
+		var template = this.Create<DatabaseTemplate>();
+		template.Namespace = Namespace;
+		
+		if (toFile) {
+			var outputFile = new OutputFile(DatabasePath);
+			template.RenderToFile(outputFile, true);
+		}
+		else {
+			template.Render(writer);
+		}
+	}
+
+	public void RenderParameterCache(TextWriter writer, bool toFile)
+	{
+		var template = this.Create<ParameterCacheTemplate>();
+		template.Namespace = Namespace;
+		
+		if (toFile) {
+			var outputFile = new OutputFile(ParameterCachePath);
+			template.RenderToFile(outputFile, true);
+		}
+		else {
+			template.Render(writer);
+		}
+	}
+
+	public void RenderCommandGroups(TextWriter writer, bool toFile)
+	{
+        Trace.WriteLine("Inside RenderCommandGroups");
+        foreach(var xmlCommandGroup in DataLayerXml.CommandGroups) {
+            Trace.WriteLine(String.Format("================ {0} ================", xmlCommandGroup.DatabaseName));
+			SchemaExplorer.DatabaseSchema source = null;
+			
+			if (Sources.ContainsKey(xmlCommandGroup.DatabaseName)) {
+                source = Sources[xmlCommandGroup.DatabaseName];
+			}
+            else{
+                Trace.WriteLine("xmlCommandGroup.DatabaseName does not match Database Sources key names");
+            }
+
+				var interfaceTemplate = this.Create<ICommandGroupTemplate>();
+				interfaceTemplate.Namespace = Namespace;
+				interfaceTemplate.Source = source;
+				interfaceTemplate.XmlCommandGroup = xmlCommandGroup;
+				interfaceTemplate.XmlSharedResults = DataLayerXml.SharedResults;
+	
+				var template = this.Create<CommandGroupTemplate>();
+				template.Namespace = Namespace;
+				template.Source = source;
+				template.XmlCommandGroup = xmlCommandGroup;
+				template.XmlSharedResults = DataLayerXml.SharedResults;
+
+				if (toFile) {
+					var fileName = "I" + xmlCommandGroup.DatabaseName + "Database.cs";
+					var outputFile = new OutputFile(fileName);
+					interfaceTemplate.RenderToFile(outputFile, true);
+
+					fileName = xmlCommandGroup.DatabaseName + "Database.cs";
+					template.ParentFile = fileName;
+					outputFile = new OutputFile(fileName);
+					template.RenderToFile(outputFile, true);
+				}
+				else {
+					interfaceTemplate.Render(writer);
+					template.Render(writer);
+				}
+				
+				_databaseNames.Add(xmlCommandGroup.DatabaseName);
+			//}
+		}
+	}
+
+    public void RenderSharedResults(TextWriter writer, bool toFile)
+    {
+        foreach (var xmlSharedResult in DataLayerXml.SharedResults) {
+			var resultRowClassTemplate = this.Create<ResultRowClassTemplate>();
+			resultRowClassTemplate.Namespace = Namespace;
+			resultRowClassTemplate.RowName = xmlSharedResult.Name;
+			resultRowClassTemplate.CommandResult = xmlSharedResult;
+
+			if (toFile) {
+				var outputFile = new OutputFile("SharedResults/" + xmlSharedResult.Name + ".cs");
+				resultRowClassTemplate.RenderToFile(outputFile, true);
+			}
+			else {
+				resultRowClassTemplate.Render(writer);
+			}
+        }
+    }
+
+    public void RenderSharedDelegates(TextWriter writer, bool toFile)
+    {
+        if (DataLayerXml.SharedResults.Any()) {
+            var sharedDelegatesClassTemplate = this.Create<SharedDelegatesClassTemplate>();
+            sharedDelegatesClassTemplate.Namespace = Namespace;
+            sharedDelegatesClassTemplate.XmlSharedResults = DataLayerXml.SharedResults;
+    
+            if (toFile) {
+                var outputFile = new OutputFile("SharedDelegates.cs");
+                sharedDelegatesClassTemplate.RenderToFile(outputFile, true);
+            }
+            else {
+                sharedDelegatesClassTemplate.Render(writer);
+            }
+        }
+    }
+
+	public void RenderDatabaseFactory(TextWriter writer, bool toFile)
+	{
+		var interfaceTemplate = this.Create<IDatabaseFactoryTemplate>();
+		interfaceTemplate.Namespace = Namespace;
+		interfaceTemplate.DatabaseNames = new CodeSmith.CustomProperties.StringCollection(_databaseNames.ToArray());
+
+		var factoryTemplate = this.Create<DatabaseFactoryTemplate>();
+		factoryTemplate.Namespace = Namespace;
+		factoryTemplate.DatabaseNames = new CodeSmith.CustomProperties.StringCollection(_databaseNames.ToArray());
+		
+		if (toFile) {
+			var outputFile = new OutputFile(IDatabaseFactoryPath);
+			interfaceTemplate.RenderToFile(outputFile, true);
+
+			outputFile = new OutputFile(DatabaseFactoryPath);
+			factoryTemplate.RenderToFile(outputFile, true);
+		}
+		else {
+			interfaceTemplate.Render(writer);
+			factoryTemplate.Render(writer);
+		}
+	}
+
+	public void RenderDatabaseException(TextWriter writer, bool toFile)
+	{
+		var template = this.Create<DatabaseExceptionTemplate>();
+		template.Namespace = Namespace;
+		
+		if (toFile) {
+			var outputFile = new OutputFile(DatabaseExceptionPath);
+			template.RenderToFile(outputFile, true);
+		}
+		else {
+			template.Render(writer);
+		}
+	}
+
+	public void RenderExtensions(TextWriter writer, bool toFile)
+	{
+		var template = this.Create<ExtensionsTemplate>();
+		template.Namespace = Namespace;
+		
+		if (toFile) {
+			var outputFile = new OutputFile(ExtensionsPath);
+			template.RenderToFile(outputFile, true);
+		}
+		else {
+			template.Render(writer);
+		}
+	}
+</script>

@@ -1,0 +1,21 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Name="CodeSmith.CustomProperties" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+<%@ Property Name="DatabaseNames" Optional="True" Type="CodeSmith.CustomProperties.StringCollection" %>
+
+<%
+	BeginNamespace();
+%>
+public partial interface IDatabaseFactory
+{
+<%
+	foreach (var databaseName in DatabaseNames) {
+%>
+	I<%=databaseName%>Database Create<%=databaseName%>Database();
+<%
+	}
+%>
+}
+<%
+	EndNamespace();
+%>

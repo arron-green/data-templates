@@ -1,0 +1,78 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Data.Common;
+
+<%
+	BeginNamespace();
+%>
+public class ParameterCache
+{
+	/// <summary>
+	/// used to store the array of parameters based on hash key. It is used as a cache.
+	/// </summary>
+	private static readonly Hashtable ParamCache = Hashtable.Synchronized(new Hashtable());
+
+	/// <summary>
+	/// Create and return a copy of the IDataParameter array.
+	/// </summary>
+	private static DbParameter[] CloneParameters(IList<DbParameter> originalParameters)
+	{
+		var clonedParameters = new DbParameter[originalParameters.Count];
+
+		for (var i = 0; i < originalParameters.Count; i++) {
+			clonedParameters[i] = (DbParameter)((ICloneable)originalParameters[i]).Clone();
+		}
+
+		return clonedParameters;
+	}
+
+	/// <summary>
+	/// Empties all items from the cache
+	/// </summary>
+	public static void Clear()
+	{
+		ParamCache.Clear();
+	}
+
+	/// <summary>
+	/// Add a parameter array to the cache for the command.
+	/// </summary>
+	public static void AddParameterSetToCache(string connectionString, string storedProcedure, DbParameter[] parameters)
+	{
+		var key = CreateHashKey(connectionString, storedProcedure);
+		ParamCache[key] = parameters;
+	}
+
+	/// <summary>
+	/// Gets a parameter array from the cache for the command. Returns null if no parameters are found.
+	/// </summary>
+	public static DbParameter[] GetCachedParameterSet(string connectionString, string storedProcedure)
+	{
+		var key = CreateHashKey(connectionString, storedProcedure);
+		var cachedParameters = (DbParameter[])(ParamCache[key]);
+		return CloneParameters(cachedParameters);
+	}
+
+	/// <summary>
+	/// Gets if a given stored procedure on a specific connection string has a cached parameter set
+	/// </summary>
+	public static bool IsParameterSetCached(string connectionString, string storedProcedure)
+	{
+		var hashKey = CreateHashKey(connectionString, storedProcedure);
+		return ParamCache[hashKey] != null;
+	}
+
+	/// <summary>
+	/// create the hash key based on connectionstring and stored procedure name
+	/// </summary>
+	private static string CreateHashKey(string connectionString, string storedProcedure)
+	{
+		return connectionString + ":" + storedProcedure;
+	}
+}
+<%
+	EndNamespace();
+%>

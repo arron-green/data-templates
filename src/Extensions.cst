@@ -1,0 +1,30 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Name="CodeSmith.CustomProperties" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+<%@ Property Name="DatabaseNames" Optional="True" Type="CodeSmith.CustomProperties.StringCollection" %>
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+<%
+	BeginNamespace();
+%>
+public static class Extensions
+{
+	public static string ToXmlInput<T>(this IEnumerable<T> list, Converter<T, string> converter)
+	{
+		var input = new StringBuilder();
+
+		input.Append("<tbl>");
+
+		foreach (var item in list)
+			input.AppendFormat("<item {0}/>", converter(item));
+
+		input.Append("</tbl>");
+
+		return input.ToString();
+	}
+}
+<%
+	EndNamespace();
+%>

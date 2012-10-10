@@ -1,0 +1,57 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Debug="True" CompilerVersion="v3.5"  %>
+<%@ Assembly Name="CodeSmith.CustomProperties" %>
+<%@ Import Namespace="System.IO" %>
+<%@ Register Name="ControllerTemplate" Template="Controller.cst" %>
+<%@ Property Name="Namespace" Type="System.String" Optional="True" Category="Options" Description="Namespace" %>
+<%@ Property Name="NorthwindSource" Type="SchemaExplorer.DatabaseSchema" Category="Data" Description="Northwind Connection" IncludeFunctions="true" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" Category="Config" Description="Defines how command code is generated" %>
+<script runat="template">
+	protected ControllerTemplate _controller;
+	protected ControllerTemplate Controller
+	{
+		get {
+			if (_controller == null) {
+				_controller = new ControllerTemplate {
+					Namespace = Namespace,
+					Sources = this.Databases,
+					DataLayerXml = DataLayerXml
+				};
+			}
+			
+			return _controller;
+		}
+	}
+	
+	protected Dictionary<string, SchemaExplorer.DatabaseSchema> Databases
+	{
+		get 		{
+			return new Dictionary<string, SchemaExplorer.DatabaseSchema>() {
+				{ "Northwind", NorthwindSource }
+			};
+		}
+	}
+</script>
+/*****************************
+BaseDb
+*****************************/
+<%--this.Controller.RenderBaseDb(this.Response, false); --%>
+
+/*****************************
+Database
+*****************************/
+<%--this.Controller.RenderDatabase(this.Response, false); --%>
+
+/*****************************
+Command Groups
+*****************************/
+<%--this.Controller.RenderCommandGroups(this.Response, false); --%>
+
+/*****************************
+Database Factory
+*****************************/
+<%--this.Controller.RenderDatabaseFactory(this.Response, false); --%>
+
+/*****************************
+Database Exception
+*****************************/
+<%--this.Controller.RenderDatabaseException(this.Response, false); --%>

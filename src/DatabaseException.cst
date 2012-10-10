@@ -1,0 +1,19 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Name="CodeSmith.CustomProperties" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+using System;
+using System.Runtime.Serialization;
+
+<%
+	BeginNamespace();
+%>
+public class DatabaseException : Exception
+{
+	public DatabaseException() { }
+	public DatabaseException(string message) : base(message) { }
+	public DatabaseException(string message, Exception innerException) : base(message, innerException) { }
+	public DatabaseException(SerializationInfo info, StreamingContext context) : base(info, context) { }
+}
+<%
+	EndNamespace();
+%>

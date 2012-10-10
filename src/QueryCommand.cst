@@ -1,0 +1,499 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" CompilerVersion="v3.5" %>
+<%@ Assembly Name="SchemaExplorer" %>
+<%@ Assembly Src="Common.cs" %>
+<%@ Assembly Src="Extensions.cs" %>
+<%@ Import Namespace="CodeSmith.Engine" %>
+<%@ Import Namespace="SchemaExplorer" %>
+<%@ Import Namespace="System.Collections.Generic" %>
+<%@ Import Namespace="System.Data" %>
+<%@ Map Name="CSharpToDataHandler" Src="Maps\CSharp-DataHandler.csmap" %>
+<%@ Map Name="DbTypeToCSharp" Src="Maps\DbType-CSharp.csmap" %>
+<%@ Map Name="DbTypeToDataHandler" Src="Maps\DbType-DataHandler.csmap" %>
+<%@ Property Name="DbCommand" Type="SchemaExplorer.CommandSchema" %>
+<%@ Property Name="CommandName" Type="System.String" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" Optional="True" %>
+<script runat="template">
+	public _CodeSmith.Command XmlCommand { get; set; }
+	public _CodeSmith.CommandResultCollection CommandResults { get; set; }
+	public _CodeSmith.CommandResultCollection XmlSharedResults { get; set; }
+
+	private class CommandParameter : _CodeSmith.Parameter
+	{
+		public DbType DbType;
+		public int Size;
+		public ParameterDirection Direction;
+
+		public bool IsInputParameter
+		{
+			get { return this.Direction == ParameterDirection.Input; }
+		}
+	}	
+</script>
+
+<%
+	//var delegatesRendered = false;
+	var genericTypes = new List<string>();
+	var delegateParams = new List<string>();
+	var delegateParamsToSend = new List<string>();
+	
+	if (XmlCommand.ResultType == _CodeSmith.ResultType.Query) {
+		//set up delegates
+		for (int i = 0; i < CommandResults.Count; i++) {
+			var commandResult = CommandResults[i];
+			var isSingleSet = (i == 0 && i == CommandResults.Count - 1);
+			var rowName = CommandName + "ResultRow";
+			//var sharedResult = XmlSharedResults.Where(result => result.Name == commandResult.Name).SingleOrDefault();
+			
+			//if (sharedResult != null) {
+			//	rowName = sharedResult.Name;
+			//}
+			//else {
+				//if (!string.IsNullOrEmpty(commandResult.Name))
+				//	rowName = commandResult.Name;
+				//else if (!isSingleSet)
+				if (!isSingleSet)
+					rowName += (i + 1).ToString();
+				
+				var methodParams = new List<string>();
+				
+				foreach (var column in commandResult.Columns) {
+					var param = StringUtil.ToCamelCase(column.Name).ToValidCSharpVariableName();
+					
+					if (Common.IsValueType(column.DataType.ToString()) && column.Nullable)
+						methodParams.Add(column.DataType.ToString() + "? " + param);
+					else if (column.DataType == _CodeSmith.DataType.binary)
+						methodParams.Add("byte[] " + param);
+					else
+						methodParams.Add(column.DataType.ToString() + " " + param);
+				}
+%>
+public delegate T <%=rowName%>Converter<out T>(<%=string.Join(", ", methodParams.ToArray())%>);
+<%
+				//delegatesRendered = true;
+			//}
+	
+			genericTypes.Add("T" + (i + 1).ToString());
+			delegateParams.Add(rowName + "Converter<T" + (i + 1).ToString() + "> converter" + (i + 1).ToString());
+			delegateParamsToSend.Add("converter" + (i + 1).ToString());
+		}
+	}
+
+	//if (delegatesRendered)
+	//	Response.WriteLine("");
+		
+	var joinedGenericTypes = string.Join(", ", genericTypes.ToArray());
+	var joinedDelegateParams = string.Join(", ", delegateParams.ToArray());
+	var joinedDelegateParamsToSend = string.Join(", ", delegateParamsToSend.ToArray());
+
+	//write reader code
+	if (XmlCommand.ResultType == _CodeSmith.ResultType.SingleRecord) {
+%>
+protected internal <%=CommandName%>Result <%=CommandName%>Result(IDataReader reader)
+{
+	var result = new <%=CommandName%>Result();
+
+	if (reader.Read()) {
+		result.RecordFound = true;
+		
+<%
+		foreach (var column in CommandResults[0].Columns) {
+			if (Common.IsValueType(column.DataType.ToString())) {
+				if (column.Nullable) {
+					if (!CSharpToDataHandler.ContainsKey(column.DataType.ToString()))
+						throw new Exception("Add " + column.DataType.ToString() + " to CSharpToDataHandler");
+%>
+		result.<%=column.Name.Replace(" ", "")%> = <%=CSharpToDataHandler[column.DataType.ToString()]%>FromDb(reader["<%=column.Name%>"]);
+<%
+				}
+				else {
+%>
+		result.<%=column.Name.Replace(" ", "")%> = (<%=column.DataType%>)reader["<%=column.Name%>"];
+<%
+				}
+			}
+			else {
+				if (column.DataType == _CodeSmith.DataType.binary) {
+%>
+		result.<%=column.Name.Replace(" ", "")%> = BytesFromReader(reader, "<%=column.Name%>");
+<%
+				}
+				else {
+%>
+		result.<%=column.Name.Replace(" ", "")%> = reader["<%=column.Name%>"] as <%=column.DataType%>;
+<%
+				}
+			}
+		}
+%>
+	}
+<%
+	}
+	else {
+%>
+protected internal <%=CommandName%>Result<<%=joinedGenericTypes%>> <%=CommandName%>Result<<%=joinedGenericTypes%>>(IDataReader reader, <%=joinedDelegateParams%>)
+<%
+		foreach (var type in genericTypes) {
+%>
+	where <%=type%> : class
+<%
+		}
+%>
+{
+	var result = new <%=CommandName%>Result<<%=joinedGenericTypes%>>();
+	
+<%
+		for (int i = 0; i < CommandResults.Count; i++) {
+			var commandResult = CommandResults[i];
+			var isSingleSet = (i == 0 && i == CommandResults.Count - 1);
+			var rowName = CommandName + "ResultRow";
+			
+			if (!string.IsNullOrEmpty(commandResult.Name))
+				rowName = commandResult.Name;
+			else if (!isSingleSet)
+				rowName += (i + 1).ToString();
+%>
+	result.<%=StringUtil.ToPlural(rowName)%> = new List<T<%=i + 1%>>();
+	
+	while (reader.Read()) {
+		var item<%=i + 1%> = converter<%=i + 1%>(
+<%
+			for (int j = 0; j < commandResult.Columns.Count(); j++) {
+				var column = commandResult.Columns[j];
+				
+				if (Common.IsValueType(column.DataType.ToString())) {
+					if (column.Nullable) {
+						if (!CSharpToDataHandler.ContainsKey(column.DataType.ToString()))
+							throw new Exception("Add " + column.DataType.ToString() + " to CSharpToDataHandler");
+%>
+			<%=CSharpToDataHandler[column.DataType.ToString()]%>FromDb(reader["<%=column.Name%>"])<%=(j == commandResult.Columns.Count() - 1) ? string.Empty : ","%>
+<%
+					}
+					else {
+%>
+			(<%=column.DataType.ToString()%>)reader["<%=column.Name%>"]<%=(j == commandResult.Columns.Count() - 1) ? string.Empty : ","%>
+<%
+					}
+				}
+				else {
+					if (column.DataType == _CodeSmith.DataType.binary) {
+%>
+			BytesFromReader(reader, "<%=column.Name%>")<%=(j == commandResult.Columns.Count - 1) ? string.Empty : ","%>
+<%
+					}
+					else {
+%>
+			reader["<%=column.Name%>"] as <%=column.DataType.ToString()%><%=(j == commandResult.Columns.Count() - 1) ? string.Empty : ","%>
+<%
+					}
+				}
+			}
+%>
+		);
+		
+		if (item<%=i + 1%> != null)
+			result.<%=StringUtil.ToPlural(rowName)%>.Add(item<%=i + 1%>);
+	}
+<%
+			if (!isSingleSet && i != CommandResults.Count - 1) {
+%>
+
+	reader.NextResult();
+	
+<%
+			}
+		}
+	}
+%>
+
+	if (!reader.IsClosed)
+		reader.Close();
+		
+	reader.Dispose();
+	
+	return result;
+}
+<%
+	//write query command code
+	var parameters = new List<CommandParameter>();
+	
+	//combine schema parameter properties with xml parameter properties
+	if (XmlCommand.Parameters != null && XmlCommand.Parameters.Any()) {
+		foreach (var dbParameter in DbCommand.NonReturnValueParameters) {
+			var xmlParameter = XmlCommand.Parameters.SingleOrDefault(p => p.Name == dbParameter.Name);
+			
+			if (xmlParameter == null) {
+				parameters.Add(new CommandParameter {
+					Name = dbParameter.Name,
+					DbType = dbParameter.DataType,
+					Direction = dbParameter.Direction,
+					Size = dbParameter.Size
+				});
+			}
+			else {
+				if (!xmlParameter.Exclude) {
+					parameters.Add(new CommandParameter {
+						Name = dbParameter.Name,
+						DbType = dbParameter.DataType,
+						Direction = dbParameter.Direction,
+						Nullable = xmlParameter.Nullable,
+						Size = dbParameter.Size,
+						HardCodedValue = xmlParameter.HardCodedValue
+					});
+				}
+			}
+		}
+	}
+	else {
+		foreach (var dbParameter in DbCommand.NonReturnValueParameters) {
+			parameters.Add(new CommandParameter {
+				Name = dbParameter.Name,
+				DbType = dbParameter.DataType,
+				Direction = dbParameter.Direction,
+				Size = dbParameter.Size
+			});
+		}
+	}
+	
+	//parameter definition for methods and method callers
+	var methodParameters = new List<string>();
+	var methodParametersToSend = new List<string>();
+	
+	foreach (var parameter in parameters) {
+		if (parameter.IsInputParameter && parameter.HardCodedValue == null) {
+			if (parameter.Nullable)
+				methodParameters.Add(string.Format("{0}? {1}", DbTypeToCSharp[parameter.DbType.ToString()], StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))));
+			else
+				methodParameters.Add(string.Format("{0} {1}", DbTypeToCSharp[parameter.DbType.ToString()], StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))));
+				
+			methodParametersToSend.Add(StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty)));
+		}
+	}
+	
+	var joinedMethodParameters = string.Join(", ", methodParameters.ToArray());
+	var joinedMethodParametersToSend = string.Join(", ", methodParametersToSend.ToArray());
+    var joinedMethodParametersAndDelegates = joinedMethodParameters;
+	if (XmlCommand.ResultType == _CodeSmith.ResultType.Query) {
+        if (string.IsNullOrEmpty(joinedMethodParameters))
+            joinedMethodParametersAndDelegates = joinedDelegateParams;
+        else if (!string.IsNullOrEmpty(joinedDelegateParams))
+		    joinedMethodParametersAndDelegates = joinedMethodParameters + ", " + joinedDelegateParams;
+    }
+%>
+
+/// <summary>
+/// executes the <%=DbCommand.Name%> procedure
+/// </summary>
+<%
+	foreach (var parameter in parameters) {
+		if (parameter.IsInputParameter && parameter.HardCodedValue == null) {
+%>
+/// <param name="<%=StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))%>">mapped to <%=parameter.Name%> input parameter</param>
+<%
+		}
+	}
+	
+	if (XmlCommand.ResultType == _CodeSmith.ResultType.SingleRecord) {
+%>
+public <%=CommandName%>Result <%=CommandName%>(<%=joinedMethodParameters%>)
+{
+	<%=CommandName%>Result result = null;
+<%
+	}
+	else {
+%>
+public <%=CommandName%>Result<<%=joinedGenericTypes%>> <%=CommandName%><<%=joinedGenericTypes%>>(<%=joinedMethodParametersAndDelegates%>)
+<%
+		foreach (var type in genericTypes) {
+%>
+	where <%=type%> : class
+<%
+		}
+%>
+{
+	<%=CommandName%>Result<<%=joinedGenericTypes%>> result = null;
+<%
+	}
+%>
+	
+	var retry = false;
+	var attempts = 0;
+	const int maxAttempts = <%=XmlCommand.MaxAttempts%>;
+	
+	do {
+		attempts++;
+			
+		using (var command = Get<%=CommandName%>Command(<%=joinedMethodParametersToSend%>)) {
+			if (Connection.State == ConnectionState.Closed)
+				Connection.Open();
+                
+            IDataReader reader = null;
+			
+		    try {
+<%
+	if (XmlCommand.ResultType == _CodeSmith.ResultType.SingleRecord) {
+%>
+				reader = command.ExecuteReader(CommandBehavior.SingleRow);
+<%
+	}
+	else if (CommandResults.Count == 1) {
+%>
+				reader = command.ExecuteReader(CommandBehavior.SingleResult);
+<%
+	}
+	else {
+%>
+				reader = command.ExecuteReader();
+<%
+	}
+
+	if (XmlCommand.ResultType == _CodeSmith.ResultType.SingleRecord) {
+%>
+               	result = <%=CommandName%>Result(reader);
+<%
+	}
+	else {
+%>
+		    	result = <%=CommandName%>Result(reader, <%=joinedDelegateParamsToSend%>);
+<%
+	}
+
+    foreach (var parameter in parameters) {
+        if (!parameter.IsInputParameter) {
+            if (!DbTypeToDataHandler.ContainsKey(parameter.DbType.ToString()))
+            	throw new Exception("Add " + parameter.DbType.ToString() + " to DbTypeToDataHandler");
+			
+			if (!Common.IsValueType(DbTypeToCSharp[parameter.DbType.ToString()]) || parameter.Nullable) {
+%>
+               	result.<%=parameter.Name.Replace("@", string.Empty)%> = <%=DbTypeToDataHandler[parameter.DbType.ToString()]%>FromParam(command, "<%=parameter.Name%>");
+<%
+			}
+			else {
+%>
+		    	result.<%=parameter.Name.Replace("@", string.Empty)%> = <%=DbTypeToDataHandler[parameter.DbType.ToString()]%>FromParam(command, "<%=parameter.Name%>").Value;
+<%
+			}
+        }
+    }
+%>
+
+				retry = false;
+			}
+            catch (System.Data.SqlClient.SqlException exSql) {
+				switch (exSql.Number) {
+                	case ConnectionRefused:
+						retry = attempts < maxAttempts;
+						
+						if (!retry)
+							ThrowDatabaseException(exSql, command);
+						
+						break;
+					default:
+				    	ThrowDatabaseException(exSql, command);
+						break;
+                }
+            }
+		    catch (Exception ex) {
+			    ThrowDatabaseException(ex, command);
+		    }
+        }
+	} while (retry);
+	
+	return result;
+}
+
+private DbCommand Get<%=CommandName%>Command(<%=joinedMethodParameters%>)
+{
+	var command = CreateStoredProcCommand("<%=DbCommand.Name%>");
+<%
+	int commandTimeout;
+	if (!string.IsNullOrEmpty(XmlCommand.CommandTimeout) && int.TryParse(XmlCommand.CommandTimeout, out commandTimeout)) {
+%>
+	command.CommandTimeout = <%=commandTimeout%>;
+<%
+	}
+
+	if (parameters.Any()) {
+%>
+	DbParameter[] paramList;
+	
+	if (ParameterCache.IsParameterSetCached(DB_KEY, "<%=CommandName%>")) {
+		paramList = ParameterCache.GetCachedParameterSet(DB_KEY, "<%=CommandName%>");
+
+<%
+		for (var i = 0; i < parameters.Count; i++) {
+			var parameter = parameters[i];
+			
+            if (parameter.HardCodedValue != null)
+                continue;
+			
+			if (parameter.IsInputParameter) {
+%>
+		paramList[<%=i%>].Value = PrepParameterValue(DbType.<%=parameter.DbType.ToString()%>, <%=StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))%>);
+<%
+			}
+			else {
+%>
+		paramList[<%=i%>].Value = null;
+<%
+			}
+		}
+%>
+	}
+	else {
+		paramList = new[] {
+<%
+		for (var i = 0; i < parameters.Count; i++) {
+			var parameter = parameters[i];
+
+			if (parameter.IsInputParameter) {
+				if (Common.RequiresSize(parameter.DbType)) {
+					if (parameter.HardCodedValue == null) {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>, <%=StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))%>, <%=parameter.Size%>)<%=(i < parameters.Count - 1) ? "," : string.Empty%>
+<%
+					}
+					else {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>, "<%=parameter.HardCodedValue%>", <%=parameter.Size%>)<%=(i < parameters.Count - 1) ? "," : string.Empty%>
+<%
+					}
+				}
+				else {
+					if (parameter.HardCodedValue == null) {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>, <%=StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))%>)<%=(i < parameters.Count - 1) ? "," : string.Empty%>
+<%
+					}
+					else {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>, <%=parameter.HardCodedValue%>)<%=(i < parameters.Count - 1) ? "," : string.Empty%>
+<%
+					}
+				}
+			}
+			else {
+				if (Common.RequiresSize(parameter.DbType)) {
+%>
+			CreateOutParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>, <%=parameter.Size%>)<%=(i < parameters.Count - 1) ? "," : string.Empty%>
+<%
+					}
+					else {
+%>
+			CreateOutParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>)<%=(i < parameters.Count - 1) ? "," : string.Empty%>
+<%
+				}
+			}
+		}
+%>
+		};
+
+		ParameterCache.AddParameterSetToCache(DB_KEY, "<%=CommandName%>", paramList);
+	}
+	
+	command.Parameters.AddRange(paramList);
+	
+<%
+	}
+%>
+	return command;
+}

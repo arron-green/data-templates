@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<DataLayer xmlns="http://www.arschema.com"
+		  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		  xsi:schemaLocation="http://www.arschema.com Commands.xsd">
+
+	<CommandGroup DatabaseName="Northwind">
+		<Command Name="GetAllProducts" ResultType="Query" AutoGenerateResults="false">
+			<CommandResult Name="ProductRow" />
+		</Command>
+		<Command Name="Categories" ResultType="Table">
+		</Command>
+	</CommandGroup>
+
+</DataLayer>

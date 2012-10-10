@@ -1,0 +1,33 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+<%@ Assembly Src="Common.cs" %>
+<%@ Property Name="RowName" Type="System.String" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" Optional="True" %>
+<script runat="template">
+	public _CodeSmith.CommandResult CommandResult { get; set; }
+</script>
+using System;
+
+<%
+	BeginNamespace();
+%>
+public struct <%=RowName%>
+{
+<%
+	foreach (var column in CommandResult.Columns) {
+		var dataType = column.DataType.ToString();
+		
+		if (column.DataType == _CodeSmith.DataType.binary)
+			dataType = "byte[]";
+%>
+	/// <summary>
+	/// mapped to the <%=column.Name%> column
+	/// </summary>
+	public <%=dataType%><%=column.Nullable ? "?" : ""%> <%=column.Name%> { get; set; }
+<%
+		}
+%>
+}
+<%
+	EndNamespace();
+%>

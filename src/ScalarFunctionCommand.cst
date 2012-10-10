@@ -1,0 +1,227 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" CompilerVersion="v3.5" %>
+<%@ Assembly Name="SchemaExplorer" %>
+<%@ Assembly Src="Common.cs" %>
+<%@ Import Namespace="CodeSmith.Engine" %>
+<%@ Import Namespace="SchemaExplorer" %>
+<%@ Import Namespace="System.Collections.Generic" %>
+<%@ Import Namespace="System.Data" %>
+<%@ Map Name="CSharpToDbType" Src="Maps\CSharp-DbType.csmap" %>
+<%@ Map Name="DbTypeToCSharp" Src="Maps\DbType-CSharp.csmap" %>
+<%@ Map Name="DbTypeToDataHandler" Src="Maps\DbType-DataHandler.csmap" %>
+<%@ Property Name="DbCommand" Type="SchemaExplorer.CommandSchema" %>
+<%@ Property Name="CommandName" Type="System.String" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" Optional="True" %>
+<script runat="template">
+	public _CodeSmith.Command XmlCommand { get; set; }
+
+	private class CommandParameter : _CodeSmith.Parameter
+	{
+		public DbType DbType;
+		public int Size;
+	}	
+</script>
+<%
+	//write non query command code
+	var parameters = new List<CommandParameter>();
+	
+	/*foreach (var dbParameter in DbCommand.Parameters) {
+		Response.WriteLine(dbParameter.Name + " " + dbParameter.Direction.ToString() + " " + dbParameter.DataType.ToString());
+	}
+	
+	if (DbCommand.ReturnValueParameter != null)
+		Response.WriteLine(DbCommand.ReturnValueParameter.Name + " " + DbCommand.ReturnValueParameter.Direction.ToString() + " " + DbCommand.ReturnValueParameter.DataType.ToString());*/
+	
+	//combine schema parameter properties with xml parameter properties
+	if (XmlCommand.Parameters != null && XmlCommand.Parameters.Any()) {
+		foreach (var dbParameter in DbCommand.InputParameters) {
+			var xmlParameter = XmlCommand.Parameters.SingleOrDefault(p => p.Name == dbParameter.Name);
+			
+			if (xmlParameter == null) {
+				parameters.Add(new CommandParameter {
+					Name = dbParameter.Name,
+					DbType = dbParameter.DataType,
+					Size = dbParameter.Size
+				});
+			}
+			else {
+				if (!xmlParameter.Exclude) {
+					parameters.Add(new CommandParameter {
+						Name = dbParameter.Name,
+						DbType = dbParameter.DataType,
+						Nullable = xmlParameter.Nullable,
+						Size = dbParameter.Size,
+						HardCodedValue = xmlParameter.HardCodedValue
+					});
+				}
+			}
+		}
+	}
+	else {
+		foreach (var dbParameter in DbCommand.NonReturnValueParameters) {
+			parameters.Add(new CommandParameter {
+				Name = dbParameter.Name,
+				DbType = dbParameter.DataType,
+				Size = dbParameter.Size
+			});
+		}
+	}
+	
+	//parameter definition for methods and method callers
+	var methodParameters = new List<string>();
+	var methodParametersToSend = new List<string>();
+	
+	foreach (var parameter in parameters) {
+		if (string.IsNullOrEmpty(parameter.HardCodedValue)) {
+			if (parameter.Nullable)
+				methodParameters.Add(string.Format("{0}? {1}", DbTypeToCSharp[parameter.DbType.ToString()], StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))));
+			else
+				methodParameters.Add(string.Format("{0} {1}", DbTypeToCSharp[parameter.DbType.ToString()], StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))));
+				
+			methodParametersToSend.Add(StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty)));
+		}
+	}
+	
+	var joinedMethodParameters = string.Join(", ", methodParameters.ToArray());
+	var joinedMethodParametersToSend = string.Join(", ", methodParametersToSend.ToArray());
+%>
+
+/// <summary>
+/// executes the <%=DbCommand.Name%> function
+/// </summary>
+<%
+	foreach (var parameter in parameters) {
+		if (string.IsNullOrEmpty(parameter.HardCodedValue)) {
+%>
+/// <param name="<%=StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))%>">mapped to <%=parameter.Name%> input parameter</param>
+<%
+		}
+	}
+
+	var returnParameter = DbCommand.ReturnValueParameter;
+	var type = DbTypeToCSharp[returnParameter.DataType.ToString()];
+
+	if (Common.IsValueType(type)) {
+%>
+public <%=type%>? <%=CommandName%>(<%=joinedMethodParameters%>)
+{
+	<%=type%>? result = null;
+<%
+	}
+	else {
+%>
+public <%=type%> <%=CommandName%>(<%=joinedMethodParameters%>)
+{
+	<%=type%> result = null;
+<%
+	}
+%>
+	
+	var retry = false;
+	var attempts = 0;
+	const int maxAttempts = <%=XmlCommand.MaxAttempts%>;
+	
+	do {
+		attempts++;
+			
+		using (var command = Get<%=CommandName%>Command(<%=joinedMethodParametersToSend%>)) {
+			if (Connection.State == ConnectionState.Closed)
+				Connection.Open();
+				
+		    try {
+				command.ExecuteNonQuery();
+
+				result = <%=DbTypeToDataHandler[returnParameter.DataType.ToString()]%>FromParam(command, "@Return");
+
+				retry = false;
+			}
+            catch (System.Data.SqlClient.SqlException exSql) {
+                switch (exSql.Number) {
+					case ConnectionRefused:
+						retry = attempts < maxAttempts;
+						
+						if (!retry)
+							ThrowDatabaseException(exSql, command);
+
+						break;
+					default:
+						ThrowDatabaseException(exSql, command);
+						break;
+                }
+            }
+            catch (Exception ex) {
+                ThrowDatabaseException(ex, command);
+            }
+        }
+	} while (retry);
+	
+	return result;
+}
+
+private DbCommand Get<%=CommandName%>Command(<%=joinedMethodParameters%>)
+{
+	var command = CreateStoredProcCommand("<%=DbCommand.Name%>");
+<%
+	int commandTimeout;
+	if (!string.IsNullOrEmpty(XmlCommand.CommandTimeout) && int.TryParse(XmlCommand.CommandTimeout, out commandTimeout)) {
+%>
+	command.CommandTimeout = <%=commandTimeout%>;
+<%
+	}
+%>
+	DbParameter[] paramList;
+	
+	if (ParameterCache.IsParameterSetCached(DB_KEY, "<%=CommandName%>")) {
+		paramList = ParameterCache.GetCachedParameterSet(DB_KEY, "<%=CommandName%>");
+
+<%
+	for (var i = 0; i < parameters.Count; i++) {
+		var parameter = parameters[i];
+%>
+		paramList[<%=i%>].Value = PrepParameterValue(DbType.<%=parameter.DbType.ToString()%>, <%=StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))%>);
+<%
+	}
+%>
+		paramList[<%=parameters.Count%>].Value = null;
+	}
+	else {
+		paramList = new[] {
+<%
+	for (var i = 0; i < parameters.Count; i++) {
+		var parameter = parameters[i];
+
+		if (Common.RequiresSize(parameter.DbType)) {
+			if (string.IsNullOrEmpty(parameter.HardCodedValue)) {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>, <%=StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))%>, <%=parameter.Size%>),
+<%
+			}
+			else {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>, "<%=parameter.HardCodedValue%>", <%=parameter.Size%>),
+<%
+			}
+		}
+		else {
+			if (string.IsNullOrEmpty(parameter.HardCodedValue)) {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>, <%=StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))%>),
+<%
+			}
+			else {
+%>
+			CreateInParameter("<%=parameter.Name%>", DbType.<%=parameter.DbType.ToString()%>, <%=parameter.HardCodedValue%>),
+<%
+			}
+		}
+	}
+%>
+			CreateParameter("@Return", DbType.<%=DbCommand.ReturnValueParameter.DataType.ToString()%>, ParameterDirection.ReturnValue)
+		};
+
+		ParameterCache.AddParameterSetToCache(DB_KEY, "<%=CommandName%>", paramList);
+	}
+	
+	command.Parameters.AddRange(paramList);
+	
+	return command;
+}

@@ -1,0 +1,256 @@
+<%@ CodeTemplate Language="C#" TargetLanguage="C#" Inherits="BaseTemplate" CompilerVersion="v3.5" %>
+<%@ Assembly Name="SchemaExplorer" %>
+<%@ Assembly Src="BaseTemplate.cs" %>
+<%@ Assembly Src="Common.cs" %>
+<%@ Import Namespace="SchemaExplorer" %>
+<%@ Map Name="DbTypeCSharp" Src="Maps\DbType-CSharp.csmap" %>
+<%@ Property Name="Source" Type="SchemaExplorer.DatabaseSchema" Optional="True" %>
+<%@ XmlProperty Name="DataLayerXml" Schema="Commands.xsd" Optional="True" %>
+<script runat="template">
+	public _CodeSmith.CommandGroup XmlCommandGroup { get; set; }
+	public _CodeSmith.CommandResultCollection XmlSharedResults { get; set; }
+</script>
+using System;
+using System.Data;
+
+<%
+	BeginNamespace();
+%>
+public interface I<%=XmlCommandGroup.DatabaseName%>Database : IDisposable
+{
+<%
+	foreach (var xmlCommand in XmlCommandGroup.Commands) {
+		//Response.WriteLine(xmlCommand.ResultType == _CodeSmith.ResultType.Table);
+		var dbCommand = Source != null ? Source.Commands[xmlCommand.Name] : null;
+		var commandName = xmlCommand.NameOverride;
+		
+		if (xmlCommand.ResultType == _CodeSmith.ResultType.Table) {
+			if (string.IsNullOrEmpty(commandName)) {
+				if (xmlCommand.Name.StartsWith("tb"))
+					commandName = xmlCommand.Name.Remove(0, 2);
+				else
+					commandName = xmlCommand.Name;
+					
+				commandName = "Get" + StringUtil.ToPlural(commandName);
+			}
+%>
+	<%=commandName%>Result<T> <%=commandName%><T>(<%=XmlCommandGroup.DatabaseName%>Database.<%=commandName%>ResultRowConverter<T> converter) where T : class;
+<%
+		}
+		else if (dbCommand != null) {
+			if (string.IsNullOrEmpty(commandName)) {
+				if (xmlCommand.Name.StartsWith("up") || xmlCommand.Name.StartsWith("uf"))
+					commandName = xmlCommand.Name.Remove(0, 2);
+				else
+					commandName = xmlCommand.Name;
+			}
+		
+			//combine schema parameter properties with xml parameter properties
+			var parameters = new List<_CodeSmith.Parameter>();
+	
+			if (xmlCommand.Parameters != null && xmlCommand.Parameters.Any()) {
+				foreach (var dbParameter in dbCommand.InputParameters) {
+					var xmlParameter = xmlCommand.Parameters.SingleOrDefault(p => p.Name == dbParameter.Name);
+					
+					if (xmlParameter == null) {
+						parameters.Add(new _CodeSmith.Parameter {
+							Name = dbParameter.Name,
+							DataType = (_CodeSmith.DataType)Enum.Parse(typeof(_CodeSmith.DataType), DbTypeCSharp[dbParameter.DataType.ToString()])
+						});
+					}
+					else {
+						if (!xmlParameter.Exclude && xmlParameter.HardCodedValue == null) {
+							parameters.Add(new _CodeSmith.Parameter {
+								Name = dbParameter.Name,
+								DataType = (_CodeSmith.DataType)Enum.Parse(typeof(_CodeSmith.DataType), DbTypeCSharp[dbParameter.DataType.ToString()]),
+								Nullable = xmlParameter.Nullable
+							});
+						}
+					}
+				}
+			}
+			else {
+				foreach (var dbParameter in dbCommand.InputParameters) {
+					parameters.Add(new _CodeSmith.Parameter {
+						Name = dbParameter.Name,
+						DataType = (_CodeSmith.DataType)Enum.Parse(typeof(_CodeSmith.DataType), DbTypeCSharp[dbParameter.DataType.ToString()])
+					});
+				}
+			}
+	
+			//parameter definition for methods
+			var methodParameters = new List<string>();
+			
+			foreach (var parameter in parameters) {
+				if (parameter.HardCodedValue == null) {
+					if (parameter.Nullable)
+						methodParameters.Add(string.Format("{0}? {1}", parameter.DataType.ToString(), StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))));
+					else
+						methodParameters.Add(string.Format("{0} {1}", parameter.DataType.ToString(), StringUtil.ToCamelCase(parameter.Name.Replace("@", string.Empty))));
+				}
+			}
+			
+			var joinedMethodParameters = string.Join(", ", methodParameters.ToArray());
+
+			if (xmlCommand.ResultType == _CodeSmith.ResultType.ScalarFunction) {
+				//var type = xmlCommand.ReturnValueType.ToString();
+                var type = DbTypeCSharp[dbCommand.ReturnValueParameter.DataType.ToString()];
+				
+				if (Common.IsValueType(type)) {
+%>
+	<%=type%>? <%=commandName%>(<%=joinedMethodParameters%>);
+<%
+				}
+				else {
+%>
+	<%=type%> <%=commandName%>(<%=joinedMethodParameters%>);
+<%
+				}
+			}
+			else if (xmlCommand.ResultType == _CodeSmith.ResultType.DataSet) {
+%>
+	DataSet <%=commandName%>(<%=joinedMethodParameters%>);
+<%
+			}
+			else if (xmlCommand.ResultType == _CodeSmith.ResultType.Query) {
+				if (!string.IsNullOrEmpty(joinedMethodParameters))
+					joinedMethodParameters = joinedMethodParameters + ", ";
+					
+				var genericTypes = new List<string>();
+				var delegateParams = new List<string>();
+				
+				if (xmlCommand.CommandResults.Any()) {
+					for (int i = 0; i < xmlCommand.CommandResults.Count; i++) {
+						var commandResult = xmlCommand.CommandResults[i];
+						var rowName = commandName + "ResultRow";
+						//var sharedResult = XmlSharedResults.Where(result => result.Name == commandResult.Name).SingleOrDefault();
+						
+						//if (sharedResult != null) {
+						//	rowName = sharedResult.Name;
+						//	delegateParams.Add(rowName + "Converter<T" + (i + 1).ToString() + "> converter" + (i + 1).ToString());
+						//}
+						//else {
+							var isSingleSet = (i == 0 && i == xmlCommand.CommandResults.Count - 1);
+					
+							//if (!string.IsNullOrEmpty(commandResult.Name))
+							//	rowName = commandResult.Name;
+							//else if (!isSingleSet)
+							if (!isSingleSet)
+								rowName += (i + 1).ToString();
+
+						    delegateParams.Add(XmlCommandGroup.DatabaseName + "Database." + rowName + "Converter<T" + (i + 1).ToString() + "> converter" + (i + 1).ToString());
+                        //}
+	
+						genericTypes.Add("T" + (i + 1).ToString());
+					}
+				}
+				else {
+					for (int i = 0; i < dbCommand.CommandResults.Count; i++) {
+						var commandResult = dbCommand.CommandResults[i];
+				
+						var isSingleSet = (i == 0 && i == dbCommand.CommandResults.Count - 1);
+						var rowName = commandName + "ResultRow";
+				
+						if (!isSingleSet)
+							rowName += (i + 1).ToString();
+	
+						genericTypes.Add("T" + (i + 1).ToString());
+						delegateParams.Add(XmlCommandGroup.DatabaseName + "Database." + rowName + "Converter<T" + (i + 1).ToString() + "> converter" + (i + 1).ToString());
+					}
+				}
+				
+				var joinedGenericTypes = string.Join(", ", genericTypes.ToArray());
+				var joinedDelegateParams = string.Join(", ", delegateParams.ToArray());
+%>
+	<%=commandName%>Result<<%=joinedGenericTypes%>> <%=commandName%><<%=joinedGenericTypes%>>(<%=joinedMethodParameters + joinedDelegateParams%>)
+<%
+				for (var i = 0; i < genericTypes.Count; i++) {
+%>
+		where <%=genericTypes[i]%> : class<%=(i == genericTypes.Count - 1) ? ";" : ""%>
+<%
+				}
+			}
+			else {
+%>
+	<%=commandName%>Result <%=commandName%>(<%=joinedMethodParameters%>);
+<%
+			}
+		}
+		else if (!string.IsNullOrEmpty(xmlCommand.CommandText)) {
+			//parameter definition for methods
+			var methodParameters = new List<string>();
+			
+			foreach (var parameter in xmlCommand.Parameters) {
+				if (parameter.HardCodedValue == null) {
+					var dataType = parameter.DataType.ToString();
+					
+					if (parameter.DataType == _CodeSmith.DataType.binary)
+						dataType = "byte[]";
+
+					if (parameter.Nullable)
+						methodParameters.Add(string.Format("{0}? {1}", dataType, StringUtil.ToCamelCase(parameter.Name)));
+					else
+						methodParameters.Add(string.Format("{0} {1}", dataType, StringUtil.ToCamelCase(parameter.Name)));
+				}
+			}
+			
+			var joinedMethodParameters = string.Join(", ", methodParameters.ToArray());
+			
+			if (xmlCommand.ResultType == _CodeSmith.ResultType.NonQuery) {
+%>
+	int <%=xmlCommand.Name%>(<%=joinedMethodParameters%>);
+<%
+			}
+			else if (xmlCommand.ResultType == _CodeSmith.ResultType.Query) {
+				if (!string.IsNullOrEmpty(joinedMethodParameters))
+					joinedMethodParameters = joinedMethodParameters + ", ";
+					
+				var genericTypes = new List<string>();
+				var delegateParams = new List<string>();
+				
+				for (int i = 0; i < xmlCommand.CommandResults.Count; i++) {
+					var commandResult = xmlCommand.CommandResults[i];
+					var rowName = commandName + "ResultRow";
+					var sharedResult = XmlSharedResults.Where(result => result.Name == commandResult.Name).SingleOrDefault();
+						
+					if (sharedResult != null) {
+						rowName = sharedResult.Name;
+                        delegateParams.Add(rowName + "Converter<T" + (i + 1).ToString() + "> converter" + (i + 1).ToString());
+					}
+					else {
+						var isSingleSet = (i == 0 && i == xmlCommand.CommandResults.Count - 1);
+					
+						if (!string.IsNullOrEmpty(commandResult.Name))
+							rowName = commandResult.Name;
+						else if (!isSingleSet)
+							rowName += (i + 1).ToString();
+
+					    delegateParams.Add(XmlCommandGroup.DatabaseName + "Database." + rowName + "Converter<T" + (i + 1).ToString() + "> converter" + (i + 1).ToString());
+                    }
+	
+					genericTypes.Add("T" + (i + 1).ToString());
+				}
+				
+				var joinedGenericTypes = string.Join(", ", genericTypes.ToArray());
+				var joinedDelegateParams = string.Join(", ", delegateParams.ToArray());
+%>
+	<%=xmlCommand.Name%>Result<<%=joinedGenericTypes%>> <%=xmlCommand.Name%><<%=joinedGenericTypes%>>(<%=joinedMethodParameters + joinedDelegateParams%>)
+<%
+				for (var i = 0; i < genericTypes.Count; i++) {
+%>
+		where <%=genericTypes[i]%> : class<%=(i == genericTypes.Count - 1) ? ";" : ""%>
+<%
+				}
+			}
+			else {
+%>
+	<%=xmlCommand.Name%>Result <%=xmlCommand.Name%>(<%=joinedMethodParameters%>);
+<%
+			}
+		}
+	}
+%>
+}
+<%
+	EndNamespace();
+%>
